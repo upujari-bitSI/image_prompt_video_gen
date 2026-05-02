@@ -345,15 +345,10 @@ def _run_mock(
         final_path = assembler.assemble(frames, output_path=out_path, config=config)
         prog.update(task, completed=1)
 
-        # Stage 5: Quality check (import directly to avoid triggering torch)
+        # Stage 5: Quality check
+        # agents/__init__.py is now lazy so this import no longer pulls in torch
         task = prog.add_task("[violet]Quality Check[/violet]", total=1)
-        import importlib.util, sys as _sys
-        _qc_spec = importlib.util.spec_from_file_location(
-            "quality_checker",
-            Path(__file__).parent / "app/backend/agents/quality_checker.py",
-        )
-        _qc_mod = importlib.util.module_from_spec(_qc_spec)  # type: ignore[arg-type]
-        _qc_spec.loader.exec_module(_qc_mod)  # type: ignore[union-attr]
+        from app.backend.agents.quality_checker import QualityCheckerAgent
 
         class _MockResult:
             pass
@@ -362,7 +357,7 @@ def _run_mock(
 
         ctx = AgentContext(raw_prompt=prompt)
         ctx.generation_result = mock_result  # type: ignore[assignment]
-        checker = _qc_mod.QualityCheckerAgent()
+        checker = QualityCheckerAgent()
         checker.process(ctx)
         prog.update(task, completed=1)
 

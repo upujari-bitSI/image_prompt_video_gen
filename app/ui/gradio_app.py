@@ -27,22 +27,42 @@ _orchestrator = PipelineOrchestrator()
 _active_job: Optional[RenderJob] = None
 _cancel_event = threading.Event()
 
+# Pre-initialize heavy models at startup to avoid UI freeze
+_scene_parser: Optional[object] = None
+_parser_ready_event = threading.Event()
 
-# ---------------------------------------------------------------------------
-# Prompt enhancer (calls scene parser's LLM)
-# ---------------------------------------------------------------------------
+def _preload_models() -> None:
+    """Load models in background thread before UI is interactive."""
+    global _scene_parser
+    try:
+        from app.backend.scene_parser import SceneParser
+        _scene_parser = SceneParser()
+        logger.info("Scene parser pre-loaded")
+    except Exception as exc:
+        logger.warning(f"Scene parser preload failed: {exc}")
+    finally:
+        _parser_ready_event.set()
+
 
 def enhance_prompt(raw_prompt: str) -> str:
+    """Enhance prompt using pre-loaded parser (non-blocking)."""
     if not raw_prompt.strip():
         return ""
     try:
-        from app.backend.scene_parser import SceneParser
-        parser = SceneParser()
-        scene = parser.parse(raw_prompt)
+        # Wait for parser to load (timeout: 5 seconds)
+        if not _parser_ready_event.wait(timeout=5.0):
+            logger.warning("Parser not ready, returning original prompt")
+            return raw_prompt
+
+        if _scene_parser is None:
+            return raw_prompt
+
+        scene = _scene_parser.parse(raw_prompt)  # type: ignore[operator]
         return scene.enhanced_prompt or raw_prompt
     except Exception as exc:
         logger.warning(f"Prompt enhancement failed: {exc}")
         return raw_prompt
+
 
 
 # ---------------------------------------------------------------------------
@@ -315,6 +335,15 @@ def build_app() -> gr.Blocks:
                     return "\n".join(lines)
 
                 refresh_sys.click(fn=get_system_info, outputs=[sys_info])
-                demo.load(fn=get_system_info, outputs=[sys_info])
+
+                def on_load() -> str:
+                    """Trigger model preload when UI loads."""
+                    preload_thread = threading.Thread(
+                        target=_preload_models, daemon=True
+                    )
+                    preload_thread.start()
+                    return get_system_info()
+
+                demo.load(fn=on_load, outputs=[sys_info])
 
     return demo

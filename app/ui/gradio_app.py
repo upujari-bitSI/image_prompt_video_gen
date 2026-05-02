@@ -188,20 +188,21 @@ def cancel_generation() -> str:
 # App builder
 # ---------------------------------------------------------------------------
 
+_THEME = gr.themes.Base(
+    primary_hue="violet",
+    secondary_hue="slate",
+    neutral_hue="slate",
+)
+
+_CSS = """
+.gradio-container { max-width: 1400px !important; }
+.stage-ok { color: #22c55e; }
+.stage-fail { color: #ef4444; }
+"""
+
+
 def build_app() -> gr.Blocks:
-    with gr.Blocks(
-        title=settings.app_name,
-        theme=gr.themes.Base(
-            primary_hue="violet",
-            secondary_hue="slate",
-            neutral_hue="slate",
-        ),
-        css="""
-        .gradio-container { max-width: 1400px !important; }
-        .stage-ok { color: #22c55e; }
-        .stage-fail { color: #ef4444; }
-        """,
-    ) as demo:
+    with gr.Blocks(title=settings.app_name) as demo:
 
         gr.Markdown(f"# 🎬 {settings.app_name} v{settings.version}")
         gr.Markdown(

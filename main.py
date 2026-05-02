@@ -70,7 +70,7 @@ def ui(
     _print_gpu_info()
     console.print(f"\n[bold]Starting Gradio UI[/bold] at http://{host}:{port}")
 
-    from app.ui.gradio_app import build_app
+    from app.ui.gradio_app import build_app, _THEME, _CSS
     demo = build_app()
     demo.queue(max_size=10).launch(
         server_name=host,
@@ -78,6 +78,8 @@ def ui(
         share=share,
         debug=debug,
         show_error=True,
+        theme=_THEME,
+        css=_CSS,
     )
 
 
@@ -121,7 +123,7 @@ def both(
 
     from app.backend.agents.orchestrator import PipelineOrchestrator
     from app.backend.api import create_app
-    from app.ui.gradio_app import build_app, _orchestrator as _ui_orch
+    from app.ui.gradio_app import build_app, _orchestrator as _ui_orch, _THEME, _CSS
     import uvicorn
 
     # FastAPI in background thread
@@ -137,7 +139,8 @@ def both(
 
     demo = build_app()
     demo.queue(max_size=10).launch(
-        server_name=host, server_port=ui_port, show_error=True
+        server_name=host, server_port=ui_port, show_error=True,
+        theme=_THEME, css=_CSS,
     )
 
 

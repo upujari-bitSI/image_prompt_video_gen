@@ -1,0 +1,48 @@
+# Environment
+.env
+*.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Model cache (large binary files)
+.model_cache/
+*.safetensors
+*.ckpt
+*.pth
+*.bin
+
+# Outputs (generated videos and frames)
+app/outputs/
+!app/outputs/.gitkeep
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Gradio temp files
+gradio_cached_examples/
+flagged/
+
+# Logs
+*.log
+logs/

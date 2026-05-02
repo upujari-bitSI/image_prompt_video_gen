@@ -94,6 +94,20 @@ class VideoDiffusionPipeline:
         self._dtype = self._resolve_dtype()
         self._device = settings.gpu.device
         self._mode: str | None = None
+        self._configure_hf_token()
+
+    @staticmethod
+    def _configure_hf_token() -> None:
+        """Pass HF_TOKEN to huggingface_hub if set, for authenticated downloads."""
+        import os
+        token = os.environ.get("HF_TOKEN", "")
+        if token:
+            try:
+                from huggingface_hub import login
+                login(token=token, add_to_git_credential=False)
+                logger.info("HuggingFace Hub: authenticated")
+            except Exception:
+                pass
 
     # ------------------------------------------------------------------
     # Public API

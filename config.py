@@ -41,8 +41,9 @@ class GPUConfig(BaseSettings):
 class DiffusionConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="DIFFUSION_", extra="ignore")
 
-    # AnimateDiff base checkpoint
-    base_model_id: str = "emilianJR/epiCRealism"
+    # AnimateDiff base checkpoint — Realistic Vision is public, stable, and
+    # widely cached on HF CDN; reliable for first-run downloads.
+    base_model_id: str = "SG161222/Realistic_Vision_V5.1_noVAE"
     motion_adapter_id: str = "guoyww/animatediff-motion-adapter-v1-5-3"
 
     # Stable Video Diffusion (image-to-video path)

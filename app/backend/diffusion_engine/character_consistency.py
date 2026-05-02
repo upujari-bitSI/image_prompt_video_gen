@@ -12,9 +12,13 @@ from pathlib import Path
 from typing import Optional
 
 import numpy as np
-import torch
 from loguru import logger
 from PIL import Image
+
+try:
+    import torch
+except ImportError:  # allow import without torch (e.g. mock/test mode)
+    torch = None  # type: ignore[assignment]
 
 from config import settings
 

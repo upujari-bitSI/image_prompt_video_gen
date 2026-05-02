@@ -161,6 +161,7 @@ def generate(
     upscale: bool = typer.Option(False, "--upscale"),
     interpolate: bool = typer.Option(False, "--interpolate"),
     output: Optional[Path] = typer.Option(None, "--output", "-o"),
+    mock: bool = typer.Option(False, "--mock", help="Skip diffusion: use gradient frames (fast pipeline test)"),
 ) -> None:
     """Generate a video from the command line (no UI)."""
     _print_banner()
@@ -169,6 +170,11 @@ def generate(
     from app.backend.agents.base_agent import AgentContext
     from app.backend.agents.orchestrator import PipelineOrchestrator, JobStatus
     from rich.progress import Progress, SpinnerColumn, TextColumn
+
+    if mock:
+        console.print("[yellow]MOCK MODE[/yellow] — skipping diffusion, using synthetic frames")
+        _run_mock(prompt, duration, fps, width, height, seed, output)
+        return
 
     ctx = AgentContext(
         raw_prompt=prompt,
@@ -214,6 +220,163 @@ def generate(
     else:
         console.print(f"[red]Generation failed:[/red] {job.error}")
         raise typer.Exit(1)
+
+
+@app.command()
+def quicktest(
+    duration: float = typer.Option(5.0, "--duration", "-d"),
+    fps: int = typer.Option(24, "--fps"),
+    output: Optional[Path] = typer.Option(None, "--output", "-o"),
+) -> None:
+    """Instant pipeline test — no models needed. Generates a real MP4 in seconds."""
+    _print_banner()
+    console.print("[cyan]Quick pipeline test — synthetic frames, no GPU required[/cyan]\n")
+    _run_mock(
+        prompt="Quick test: gradient frames cycling through colors",
+        duration=duration,
+        fps=fps,
+        width=640,
+        height=360,
+        seed=42,
+        output=output,
+    )
+
+
+def _run_mock(
+    prompt: str,
+    duration: float,
+    fps: int,
+    width: int,
+    height: int,
+    seed: int,
+    output: Optional[Path],
+) -> None:
+    """
+    Full pipeline test without diffusion.
+    Generates synthetic gradient frames so every other stage can be validated
+    (scene parser, motion planner, assembler, quality checker) in seconds.
+    """
+    import time
+    import numpy as np
+    from PIL import Image
+    from rich.progress import Progress, BarColumn, TextColumn, TimeElapsedColumn
+    from app.backend.scene_parser import SceneParser
+    from app.backend.motion_engine import MotionPlanner
+    from app.backend.motion_engine.keyframe_generator import KeyframeGenerator
+    from app.backend.video_builder.assembler import VideoAssembler, AssemblyConfig
+    from app.backend.agents.base_agent import AgentContext
+    from config import OUTPUTS_DIR
+
+    t0 = time.perf_counter()
+    total_frames = int(duration * fps)
+
+    with Progress(
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TextColumn("{task.completed}/{task.total}"),
+        TimeElapsedColumn(),
+        console=console,
+    ) as prog:
+
+        # Stage 1: Scene parsing
+        task = prog.add_task("[violet]Scene Parser[/violet]", total=1)
+        parser = SceneParser()
+        scene = parser.parse(prompt)
+        prog.update(task, completed=1)
+        console.print(f"  ✓ Camera: [cyan]{scene.camera.movement}[/cyan]  "
+                      f"Subjects: [cyan]{len(scene.subjects)}[/cyan]  "
+                      f"Style: [cyan]{scene.style_hint}[/cyan]")
+
+        # Stage 2: Motion plan
+        task = prog.add_task("[violet]Motion Planner[/violet]", total=1)
+        planner = MotionPlanner()
+        plan = planner.plan(scene, prompt, duration_s=duration, fps=fps)
+        kf_gen = KeyframeGenerator()
+        keyframes = kf_gen.generate(plan, list(range(0, total_frames, max(1, fps // 6))))
+        prog.update(task, completed=1)
+        console.print(f"  ✓ {total_frames} frames  "
+                      f"{len(keyframes)} keyframes  "
+                      f"intensity={plan.intensity:.1f}")
+
+        # Stage 3: Synthetic frame generation
+        rng = np.random.default_rng(seed)
+        task = prog.add_task("[violet]Frame Synthesis[/violet]", total=total_frames)
+        frames = []
+        # Pick 3 random hue stops and lerp between them for smooth colour journey
+        h1 = rng.integers(0, 255, 3).tolist()
+        h2 = rng.integers(0, 255, 3).tolist()
+        h3 = rng.integers(0, 255, 3).tolist()
+        for i in range(total_frames):
+            t = i / max(total_frames - 1, 1)
+            if t < 0.5:
+                alpha = t * 2
+                colour = [int(h1[c] * (1 - alpha) + h2[c] * alpha) for c in range(3)]
+            else:
+                alpha = (t - 0.5) * 2
+                colour = [int(h2[c] * (1 - alpha) + h3[c] * alpha) for c in range(3)]
+
+            # Gradient frame with noise
+            arr = np.zeros((height, width, 3), dtype=np.uint8)
+            grad_x = np.linspace(0, 1, width)
+            grad_y = np.linspace(0, 1, height)
+            gx, gy = np.meshgrid(grad_x, grad_y)
+            for c in range(3):
+                base = colour[c] / 255.0
+                arr[:, :, c] = np.clip(
+                    (base * 0.7 + gx * 0.15 + gy * 0.15 +
+                     rng.random((height, width)) * 0.04) * 255,
+                    0, 255,
+                ).astype(np.uint8)
+
+            # Stamp frame number onto frame
+            from PIL import ImageDraw
+            img = Image.fromarray(arr)
+            draw = ImageDraw.Draw(img)
+            draw.text((10, 10), f"Frame {i+1}/{total_frames}", fill=(255, 255, 255))
+            draw.text((10, 30), prompt[:60], fill=(200, 200, 200))
+            frames.append(img)
+            prog.update(task, completed=i + 1)
+
+        # Stage 4: Assemble video
+        task = prog.add_task("[violet]Video Assembly[/violet]", total=1)
+        out_path = output or (OUTPUTS_DIR / f"mock_{int(time.time())}.mp4")
+        assembler = VideoAssembler()
+        config = AssemblyConfig(fps=fps, width=width, height=height, crf=23, preset="fast")
+        final_path = assembler.assemble(frames, output_path=out_path, config=config)
+        prog.update(task, completed=1)
+
+        # Stage 5: Quality check (import directly to avoid triggering torch)
+        task = prog.add_task("[violet]Quality Check[/violet]", total=1)
+        import importlib.util, sys as _sys
+        _qc_spec = importlib.util.spec_from_file_location(
+            "quality_checker",
+            Path(__file__).parent / "app/backend/agents/quality_checker.py",
+        )
+        _qc_mod = importlib.util.module_from_spec(_qc_spec)  # type: ignore[arg-type]
+        _qc_spec.loader.exec_module(_qc_mod)  # type: ignore[union-attr]
+
+        class _MockResult:
+            pass
+        mock_result = _MockResult()
+        mock_result.frames = frames  # type: ignore[attr-defined]
+
+        ctx = AgentContext(raw_prompt=prompt)
+        ctx.generation_result = mock_result  # type: ignore[assignment]
+        checker = _qc_mod.QualityCheckerAgent()
+        checker.process(ctx)
+        prog.update(task, completed=1)
+
+    elapsed = time.perf_counter() - t0
+    console.print(Panel.fit(
+        f"[green]Pipeline test passed![/green]\n\n"
+        f"Output : [bold]{final_path}[/bold]\n"
+        f"Frames : {total_frames}  ({duration}s @ {fps}fps)\n"
+        f"Quality: {ctx.quality_score:.0f}/100\n"
+        f"Time   : {elapsed:.1f}s\n\n"
+        f"[dim]Notes: {', '.join(ctx.quality_notes) or 'None'}[/dim]",
+        border_style="green",
+        title="Mock Generation Complete",
+    ))
 
 
 def _print_quality_table(job) -> None:

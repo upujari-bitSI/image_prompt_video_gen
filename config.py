@@ -25,7 +25,7 @@ for _d in (ASSETS_DIR / "characters", ASSETS_DIR / "objects", ASSETS_DIR / "back
 
 
 class GPUConfig(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="GPU_")
+    model_config = SettingsConfigDict(env_prefix="GPU_", extra="ignore")
 
     device: str = "cuda"
     dtype: Literal["bf16", "fp16", "fp32"] = "bf16"
@@ -39,7 +39,7 @@ class GPUConfig(BaseSettings):
 
 
 class DiffusionConfig(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="DIFFUSION_")
+    model_config = SettingsConfigDict(env_prefix="DIFFUSION_", extra="ignore")
 
     # AnimateDiff base checkpoint
     base_model_id: str = "emilianJR/epiCRealism"
@@ -67,7 +67,7 @@ class DiffusionConfig(BaseSettings):
 
 
 class VideoConfig(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="VIDEO_")
+    model_config = SettingsConfigDict(env_prefix="VIDEO_", extra="ignore")
 
     default_duration_s: int = 10
     default_fps: int = 24
@@ -79,17 +79,24 @@ class VideoConfig(BaseSettings):
 
 
 class LLMConfig(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="LLM_")
+    model_config = SettingsConfigDict(env_prefix="LLM_", extra="ignore")
 
     provider: Literal["anthropic", "openai", "ollama", "local"] = "anthropic"
     model: str = "claude-sonnet-4-6"
     temperature: float = 0.3
     max_tokens: int = 1024
-    api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
+    # validation_alias lets pydantic-settings read ANTHROPIC_API_KEY directly,
+    # bypassing the LLM_ prefix for this one field.
+    api_key: str = Field(default="", validation_alias="ANTHROPIC_API_KEY")
 
 
 class AppConfig(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        env_prefix="APP_",   # APP_HOST → host, APP_PORT → port, APP_DEBUG → debug
+        extra="ignore",      # silently drop ANTHROPIC_API_KEY, GPU_*, etc. at this level
+    )
 
     app_name: str = "AI Video Gen Studio"
     version: str = "1.0.0"
